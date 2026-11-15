@@ -1,0 +1,55 @@
+{
+  "name": "dogsc-windows",
+  "productName": "DogSC",
+  "version": "0.1.2-win.9-dev",
+  "description": "DogSC 的 Windows 适配版：录屏、轻量剪辑、自动运镜与导出。原版由神烦老狗（laogou717）创作。",
+  "author": "神烦老狗 (https://github.com/laogou717)",
+  "homepage": "https://github.com/laogou717/dogsc",
+  "main": "src/main/main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/preview-state.test.js tests/projection.test.js tests/project-contract.test.js tests/screen-motion.test.js tests/layout-features.test.js tests/animation-effects.test.js tests/video-color.test.js tests/overlays.test.js tests/export-transaction.test.js tests/timeline-media.test.js tests/geometry-presets.test.js tests/windows-reliability.test.js tests/effect-editing.test.js tests/recorder-dock.test.js tests/save-recovery.test.js tests/effect-batch.test.js tests/effect-assets.test.js tests/asset-relink.test.js tests/effect-slices.test.js",
+    "build": "electron-builder --win",
+    "build:dir": "electron-builder --win --dir"
+  },
+  "dependencies": {
+    "koffi": "^3.3.2"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.laogou717.dogsc.windows",
+    "productName": "DogSC",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "LICENSE",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "Resources"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**/*"
+    ],
+    "win": {
+      "icon": "resources/AppIconMaster.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

@@ -1,0 +1,20 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {makeProject}=require('../src/core/model');
+const {exportProject}=require('../src/renderer/editor/export');
+exports.run=async directory=>{
+  const project=makeProject({name:'cancel regression',media:{screen:{file:'white.mp4',width:640,height:360,duration:3,frameRate:30}}});
+  const outputFile=path.join(directory,'cancel-regression.mp4');
+  fs.writeFileSync(outputFile,'existing-output');
+  const before=new Set(fs.readdirSync(directory));
+  const controller=new AbortController();let cancelledAt=0;
+  await assert.rejects(exportProject({project,directory,outputFile,frameRate:30,signal:controller.signal,onProgress:progress=>{if(progress.frames>=6){cancelledAt=progress.frames;controller.abort();}}}),error=>error.cancelled===true);
+  assert.ok(cancelledAt>=6);assert.equal(fs.readFileSync(outputFile,'utf8'),'existing-output');
+  const leftovers=fs.readdirSync(directory).filter(file=>!before.has(file)&&file.includes('.export'));
+  assert.deepEqual(leftovers,[]);
+  const preaborted=new AbortController();preaborted.abort();
+  await assert.rejects(exportProject({project,directory,outputFile,signal:preaborted.signal}),error=>error.cancelled===true);
+  assert.equal(fs.readFileSync(outputFile,'utf8'),'existing-output');
+  const result=await exportProject({project,directory,outputFile,frameRate:30});assert.equal(result.frames,90);assert.ok(fs.statSync(outputFile).size>100);
+  return {passed:true,cancelledDuringRendering:true,preaborted:true,existingOutputPreserved:true,noTemporaryOutputLeak:true,retrySucceeded:true};
+};

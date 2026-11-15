@@ -1,0 +1,100 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');
+const {BrowserWindow,ipcMain}=require('electron');
+exports.run=async(directory)=>{
+  const {makeProject,normalizeProject,validateProjectContract}=require('../src/core/model');
+  const project=makeProject({name:'选中与剪贴板验收',media:{screen:{file:'white.mp4',width:640,height:360,duration:3,frameRate:30}}});
+  project.zoomAnimations=[require('../src/core/zoom').makeClip({startTime:0.25,endTime:0.75,enterDuration:0.1,exitDuration:0.1})];
+  project.timeline.screenMotionClips=[{id:'screen-original',timing:{startTime:0,duration:0.7,leadInDuration:0.2,returnDuration:0.1,easing:'linear'},target:{position:{x:0.5,y:0.5},scale:0.9393313663236641,rotationX:1,rotationY:-18,rotationZ:0,perspective:0.8}}];
+  let saved=null,clipboardText='',copyCalls=0;
+  require('../src/main/project-files').writeProject(directory,project);
+  const foreign=path.join(directory,'foreign-sticker-project');fs.mkdirSync(foreign,{recursive:true});
+  const foreignImage=path.join(foreign,'green.png');
+  await require('../src/main/ffmpeg').ffmpeg(['-loglevel','error','-f','lavfi','-i','color=c=green:s=64x64','-frames:v','1',foreignImage]);
+  const foreignProject=makeProject({name:'foreign sticker',media:project.media}),foreignClip=require('../src/core/overlays').makeSticker('green.png',0.1,0.5);foreignProject.timeline.stickerClips=[foreignClip];require('../src/main/project-files').writeProject(foreign,foreignProject);
+  for(const name of ['project:read','project:write','project:waveforms'])ipcMain.removeHandler(name);
+  ipcMain.handle('project:read',()=>normalizeProject(JSON.parse(JSON.stringify(saved||project))));
+  ipcMain.handle('project:write',(event,{directory:target,project:edited})=>{if(target!==directory)throw Error('Synthetic directory only');validateProjectContract(edited);saved=JSON.parse(JSON.stringify(edited));fs.writeFileSync(path.join(directory,'edited-selection-project.json'),JSON.stringify(saved,null,2));});
+  ipcMain.handle('project:waveforms',()=>({}));
+  // Exercise application IPC without replacing the user's Windows clipboard.
+  const bridge=new(require('../src/main/effect-clipboard').EffectClipboard)({writeText:async text=>{clipboardText=text;},readText:async()=>clipboardText});
+  const assets=new(require('../src/main/effect-assets').EffectAssets)();
+  ipcMain.handle('effects:copy',(event,payload)=>{copyCalls++;return bridge.copy(payload);});
+  ipcMain.handle('effects:paste',async(event,request)=>assets.prepare(event.sender,await bridge.paste(),request.directory,request.project,request.sourceTime));
+  ipcMain.handle('effects:accept-import',(event,id)=>assets.finish(event.sender.id,id,true));ipcMain.handle('effects:discard-import',(event,id)=>assets.finish(event.sender.id,id,false));
+  ipcMain.handle('probe:foreign-copy',()=>bridge.copy(require('../src/core/effect-clipboard').copyEffects(foreignProject,{type:'sticker',id:foreignClip.id},foreign)));
+  ipcMain.handle('project:assets',(event,{directory,project})=>require('../src/core/project-assets').assetReferences(project).map(({key,label,file,kind})=>({key,label,file,kind,exists:fs.existsSync(path.join(directory,file))})));
+  ipcMain.handle('project:relink-asset',(event,{directory,project,key})=>require('../src/main/asset-relink').relinkAsset(directory,project,key,path.join(directory,'white.mp4'),require('../src/main/ffmpeg')));
+  const editor=new BrowserWindow({show:false,width:1480,height:940,webPreferences:{nodeIntegration:true,contextIsolation:false,backgroundThrottling:false}});
+  try{
+    await editor.loadFile(path.join(__dirname,'../src/renderer/editor.html'),{query:{project:directory}});
+    const modulePath=JSON.stringify(path.join(__dirname,'effect-editor-probe.js'));
+    const result=await editor.webContents.executeJavaScript(`require(${modulePath}).exercise().catch(error=>({probeError:error.stack}))`);
+    if(result.probeError)throw new Error(result.probeError);
+    const assert=require('node:assert/strict');assert.equal(copyCalls,4);assert.equal(saved.zoomAnimations.length,3);assert.equal(saved.schema,3);assert.ok(clipboardText.startsWith('DogSC-Effects/2\n'));assert.equal(saved.timeline.screenMotionClips.length,2);
+    assert.equal(saved.timeline.screenMotionClips[1].target.scale,0.9393313663236641);
+    assert.ok(saved.zoomAnimations.some(c=>Math.abs(c.startTime-1.5)<0.03));
+    assert.ok(saved.media.screen.file.startsWith('media/relinked/'));assert.equal(saved.timeline.stickerClips.length,1);
+    assert.equal(saved.canvas.screenFrameOuterCornerRadius,60);assert.equal(saved.canvas.screenFrameContentCornerRadius,12);assert.equal(saved.canvas.screenFrameInsetOpacity,0.6);
+    const ownedSticker=path.join(directory,saved.timeline.stickerClips[0].relativePath);assert.deepEqual(fs.readFileSync(ownedSticker),fs.readFileSync(foreignImage));fs.rmSync(foreignImage);
+    result.persisted=true;
+    await new Promise(resolve=>{editor.webContents.once('did-finish-load',resolve);editor.reload();});
+    const reopened=await editor.webContents.executeJavaScript(`require(${modulePath}).checkReopened().then(()=>true,error=>({probeError:error.stack}))`);
+    if(reopened.probeError)throw new Error(reopened.probeError);
+    result.reopened=true;result.clipboardScope='Isolated probe clipboard; user clipboard untouched';
+    fs.writeFileSync(path.join(directory,'editor-selection.png'),(await editor.webContents.capturePage()).toPNG());
+    return result;
+  }finally{editor.destroy();}
+};
+
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function ready(){for(let i=0;i<400;i++){if(typeof window.dogscSelfTest==='function'&&document.getElementById('preview').width>2)return;await wait(25);}throw Error('Editor did not initialize');}
+const clickTab=text=>[...document.querySelectorAll('#rail button')].find(n=>n.textContent.trim()===text).click();
+const select=selector=>{const node=document.querySelector(selector);if(!node)throw Error('Missing '+selector);const r=node.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;node.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,clientX:x,clientY:y}));window.dispatchEvent(new MouseEvent('pointerup',{bubbles:true,clientX:x,clientY:y}));};
+const assertTab=text=>{const assert=require('node:assert/strict');assert.equal(document.getElementById('inspector-title').textContent.trim(),text);assert.equal(document.querySelector('#rail button.active').textContent.trim(),text);};
+const shortcut=(key,target=window)=>{const event=new KeyboardEvent('keydown',{key,ctrlKey:true,bubbles:true,cancelable:true});target.dispatchEvent(event);return event;};
+exports.exercise=async()=>{
+  const assert=require('node:assert/strict');await ready();await wait(150);
+  select('#lane-screen-motion .zoom-clip');assertTab('屏幕 3D');
+  let field=[...document.querySelectorAll('.field')].find(n=>n.textContent.includes('目标缩放'));assert.equal(field.querySelector('.value').textContent,'0.94×');
+  select('#lane-zoom .zoom-clip');assertTab('运镜');
+  clickTab('屏幕 3D');select('#lane-zoom .zoom-clip');assertTab('运镜');
+  clickTab('屏幕 3D');assert.notEqual(getComputedStyle(document.querySelector('.zoom-tail')).pointerEvents,'none');select('.zoom-tail');assertTab('运镜');
+  shortcut('c');await wait(100);
+  const bounds=document.getElementById('lanes').getBoundingClientRect(),x=bounds.left+14+(bounds.width-28)/2;
+  document.getElementById('ruler').dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,clientX:x}));window.dispatchEvent(new MouseEvent('pointerup',{bubbles:true,clientX:x}));
+  shortcut('v');await wait(200);assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,2);assertTab('运镜');
+  shortcut('z');assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,1);shortcut('y');assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,2);
+  select('#lane-screen-motion .zoom-clip');assertTab('屏幕 3D');shortcut('c');await wait(100);shortcut('v');await wait(200);assert.equal(document.querySelectorAll('#lane-screen-motion .zoom-clip').length,2);assertTab('屏幕 3D');
+  shortcut('v');await wait(150);assert.equal(document.querySelectorAll('#lane-screen-motion .zoom-clip').length,2);assert.match(document.getElementById('toast').textContent,/重叠|冲突/);
+  const input=document.getElementById('project-name');input.focus();assert.equal(shortcut('c',input).defaultPrevented,false);assert.equal(shortcut('v',input).defaultPrevented,false);input.blur();
+  const editable=document.createElement('div');editable.contentEditable='true';document.body.append(editable);editable.focus();assert.equal(shortcut('c',editable).defaultPrevented,false);editable.remove();
+  select('#lane-zoom .zoom-clip');
+  const screenNode=document.querySelector('#lane-screen-motion .zoom-clip'),screenBounds=screenNode.getBoundingClientRect();screenNode.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,ctrlKey:true,clientX:screenBounds.left+15,clientY:screenBounds.top+10}));
+  assert.equal(document.querySelectorAll('.zoom-clip.selected').length,2);assert.match(document.getElementById('inspector').textContent,/已选中 2/);
+  const selectedZoom=document.querySelector('#lane-zoom .zoom-clip'),beforeLeft=parseFloat(selectedZoom.style.left),zoomBounds=selectedZoom.getBoundingClientRect(),dx=parseFloat(selectedZoom.style.width)/0.5*0.1;
+  selectedZoom.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,clientX:zoomBounds.left+20}));window.dispatchEvent(new MouseEvent('pointermove',{bubbles:true,clientX:zoomBounds.left+20+dx,shiftKey:true}));window.dispatchEvent(new MouseEvent('pointerup',{bubbles:true,clientX:zoomBounds.left+20+dx}));
+  assert.ok(parseFloat(document.querySelector('#lane-zoom .zoom-clip').style.left)>beforeLeft+1);shortcut('z');
+  shortcut('c');await wait(100);shortcut('a');assert.equal(document.querySelectorAll('.zoom-clip.selected').length,4);
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete',bubbles:true}));assert.equal(document.querySelectorAll('.zoom-clip').length,0);
+  shortcut('v');await wait(200);assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,1);assert.equal(document.querySelectorAll('#lane-screen-motion .zoom-clip').length,1);
+  shortcut('z');assert.equal(document.querySelectorAll('.zoom-clip').length,0);shortcut('z');assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,2);assert.equal(document.querySelectorAll('#lane-screen-motion .zoom-clip').length,2);
+  clickTab('素材');await wait(150);assert.match(document.getElementById('inspector').textContent,/屏幕录像/);
+  [...document.querySelectorAll('#inspector button')].find(n=>n.textContent.trim()==='重新定位…').click();
+  let reloaded=false;for(let i=0;i<100;i++){await wait(100);if(window.dogscSelfTest().screenSource.includes('relinked')){reloaded=true;break;}}
+  assert.ok(reloaded,'preview must switch to the replacement video; '+document.getElementById('toast').textContent);
+  await require('electron').ipcRenderer.invoke('probe:foreign-copy');shortcut('v');await wait(200);assert.equal(document.querySelectorAll('#lane-sticker .zoom-clip').length,1);
+  clickTab('画面');let frameField=[...document.querySelectorAll('.field')].find(n=>n.textContent.includes('外框样式'));let style=frameField.querySelector('select');style.value='browserLight';style.dispatchEvent(new Event('change'));
+  for(const [label,value]of [['外框圆角',60],['内容圆角',12],['外框透明度',0.6]]){const field=[...document.querySelectorAll('.field')].find(n=>n.textContent.includes(label)),input=field.querySelector('input');input.dispatchEvent(new Event('pointerdown'));input.value=String(value);input.dispatchEvent(new Event('input'));input.dispatchEvent(new Event('change'));}
+  select('#lane-zoom .zoom-clip');
+  const rulerBounds=document.getElementById('lanes').getBoundingClientRect(),cutX=rulerBounds.left+14+(rulerBounds.width-28)/6;
+  document.getElementById('ruler').dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,clientX:cutX}));window.dispatchEvent(new MouseEvent('pointerup',{bubbles:true,clientX:cutX}));
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:'s',bubbles:true}));
+  assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,3);assert.match(document.getElementById('inspector').textContent,/保留原动画进度/);
+  assert.equal(document.querySelector('#lane-zoom .zoom-clip.selected .handle'),null);shortcut('c');await wait(100);
+  [...document.querySelectorAll('#inspector button')].find(n=>n.textContent.trim()==='解除进度保留并独立编辑').click();assert.ok(document.querySelector('#lane-zoom .zoom-clip.selected .handle'));
+  shortcut('z');assert.match(document.getElementById('inspector').textContent,/保留原动画进度/);shortcut('z');assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,2);shortcut('y');assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,3);
+  await wait(700);
+  return{passed:true,zoomAnd3DSwitching:true,reselectAfterManualTab:true,transitionTailSelection:true,scaleFormatting:true,zoomCopyPaste:true,screen3DCopyPaste:true,undoRedo:true,overlapRejected:true,nativeTextShortcutsPreserved:true,multiSelect:true,batchMove:true,batchCopyPaste:true,selectAllDeleteUndo:true,relinkAndPreviewReload:true,crossProjectStickerOwned:true,customFrameControls:true,animationSplitUndo:true,phaseClipboardV2:true,explicitUnlock:true};
+};
+exports.checkReopened=async()=>{await ready();const assert=require('node:assert/strict');assert.equal(document.querySelectorAll('#lane-zoom .zoom-clip').length,3);assert.equal(document.querySelectorAll('#lane-screen-motion .zoom-clip').length,2);select('#lane-zoom .zoom-clip');assertTab('运镜');select('#lane-screen-motion .zoom-clip');assertTab('屏幕 3D');};
