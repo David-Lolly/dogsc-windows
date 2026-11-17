@@ -52,7 +52,7 @@ DogSC 原版是 macOS 原生应用（Swift + AppKit / ScreenCaptureKit / AVFound
 
 ### 1. 克隆并安装依赖
 ```powershell
-git clone <your-repo-url>
+git clone https://github.com/David-Lolly/dogsc-windows.git
 cd dogsc-windows
 npm install
 ```
