@@ -1,8 +1,40 @@
 # DogSC · Windows 适配版
 
+**功能更完整的 Windows 适配版** · 开源地址：https://github.com/David-Lolly/dogsc-windows
+
 > **原创作者：神烦老狗（[@laogou717](https://github.com/laogou717)）· 原仓库：[laogou717/dogsc](https://github.com/laogou717/dogsc)**
 >
 > DogSC 由原作者设计、开发并以 MIT License 开源。本仓库是在原版基础上重写的 Windows 适配版：产品形态、界面布局、功能定义，以及 `src/core/` 中的核心算法和默认参数均源自原版。它不是原作者的官方发布，使用中的问题请在本仓库反馈，不要提交到原仓库。
+
+## 成品效果预览
+
+![成品预览](docs/demo/showcase.gif)
+
+[点击观看 2K 60fps 原画成品视频（showcase.mp4）](docs/demo/showcase.mp4)
+
+---
+
+## 直接下载成品包（开箱即用，无需安装 FFmpeg）
+
+- **百度网盘**：https://pan.baidu.com/s/1TC_wv3_Vby_jZpu8ZtCrpA?pwd=xll1 （提取码：`xll1`）
+- **夸克网盘**：https://pan.quark.cn/s/6730da699871
+
+> **提示**：由于未配置代码签名，首次运行如果被 Windows SmartScreen 拦截，点 **“更多信息 → 仍要运行”** 即可！
+
+---
+
+## 本版适配亮点与规划
+
+1. 修复了此前适配版本中出现的拖动、放大画面频闪的问题。
+2. 内置完整版 FFmpeg，开箱即用，无需用户单独安装外部依赖。
+3. 原版 macOS 上支持的 3D 运镜、柔化/突出、开场动画等核心效果均已支持。
+4. 优化了交互操作：支持录制横条收起为悬浮胶囊、快捷键复制粘贴运镜/3D 等效果素材，并支持跨项目复制粘贴。
+5. 原作者为了让剪辑更顺畅所做的画面质量调整等功能正在持续适配中，其余细节也在不断完善。
+6. 后续原版推出新功能，本仓库也会持续跟进集成和适配。
+7. 个人认为比较实用好用的新功能也会不断加入进来。
+8. **AI 集成计划**：尝试开发 MCP 或 CLI 暴露给 AI，后续让 AI 帮忙自动剪辑录制好的视频。
+
+---
 
 DogSC 原版是 macOS 原生应用（Swift + AppKit / ScreenCaptureKit / AVFoundation）。本项目使用 **Electron + FFmpeg + WebCodecs** 在 Windows 上实现完整录屏、轻量剪辑、自动缩放/3D 运镜与导出工作流。
 
